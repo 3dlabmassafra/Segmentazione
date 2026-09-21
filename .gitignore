@@ -1,0 +1,14 @@
+node_modules/
+dist/
+.cache/
+.arena/
+.local/
+.config/
+.env
+.env.*
+*.zip
+tests/*.png
+tests/fixtures/
+playwright-report/
+test-results/
+.DS_Store

@@ -1,0 +1,11 @@
+import {chromium} from '@playwright/test';
+import fs from 'node:fs';
+const browser=await chromium.launch({headless:true,args:['--no-sandbox','--enable-unsafe-swiftshader']});
+const page=await browser.newPage({viewport:{width:1440,height:1100},deviceScaleFactor:1});
+page.on('pageerror',e=>console.log('PAGEERROR',e.message));page.on('console',m=>{if(m.type()==='error')console.log('ERROR',m.text());});
+await page.goto('http://localhost:5173');
+await page.waitForFunction(()=>document.querySelector('#loading').hidden,{timeout:60000});
+console.log('Parts',await page.locator('.part-card').count(),'Status',await page.locator('#engine-status').textContent(),'Toast',await page.locator('#toast').textContent());
+await page.screenshot({path:'/home/user/tests/desktop.png',fullPage:true});
+await page.locator('#export-all').click();
+await browser.close();
