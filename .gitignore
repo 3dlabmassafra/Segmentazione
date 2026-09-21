@@ -12,3 +12,6 @@ tests/fixtures/
 playwright-report/
 test-results/
 .DS_Store
+
+.npm/
+.sudo_as_admin_successful

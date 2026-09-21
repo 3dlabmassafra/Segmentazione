@@ -12,7 +12,7 @@ fs.mkdirSync('tests/fixtures',{recursive:true});fs.writeFileSync('tests/fixtures
 const browser=await chromium.launch({headless:true,args:['--no-sandbox','--enable-unsafe-swiftshader']});
 const page=await browser.newPage({viewport:{width:1440,height:1000}});const errors=[];page.on('pageerror',e=>errors.push(e.message));
 const waitReady=()=>expect(page.locator('#loading')).toBeHidden({timeout:60000});
-await page.goto('http://localhost:5173');await waitReady();await expect(page.locator('.part-card')).toHaveCount(3);
+await page.goto('http://localhost:5173');await waitReady();await page.locator('[data-mode="plane"]').click();await page.locator('#apply-cuts').click();await waitReady();await expect(page.locator('.part-card')).toHaveCount(3);
 await page.screenshot({path:'tests/desktop.png',fullPage:true});
 async function exportZip(){const promise=page.waitForEvent('download');await page.locator('#export-all').click();const d=await promise;const path=await d.path();return unzipSync(fs.readFileSync(path));}
 function validateSTL(bytes){const geom=new STLLoader().parse(bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.byteLength));const pos=new Float32Array(geom.attributes.position.array);const mesh=new lib.Mesh({numProp:3,vertProperties:pos,triVerts:Uint32Array.from({length:pos.length/3},(_,i)=>i)});mesh.merge();const solid=new lib.Manifold(mesh);if(solid.status()!=='NoError')throw new Error('Non-manifold export: '+solid.status());const vol=solid.volume();const bounds=solid.boundingBox();if(Math.abs(bounds.min[2])>.001)throw new Error('Export not grounded');solid.delete();geom.dispose();return vol;}

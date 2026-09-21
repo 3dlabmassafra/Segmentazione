@@ -1,3 +1,4 @@
+import { splitCurved } from './curve-math.js';
 import Module from 'manifold-3d';
 import wasmUrl from 'manifold-3d/manifold.wasm?url';
 let lib, original;
@@ -54,6 +55,11 @@ self.onmessage = async ({data}) => {
       if(original) original.delete();
       original=normalized;
       self.postMessage({id,result:pack(original)});
+    } else if(type==='curve-cut') {
+      if(!original) throw new Error('Carica prima un modello.');
+      const solids=splitCurved(lib,original,data.curve);
+      try { self.postMessage({id,result:solids.map(pack)}); }
+      finally { solids.forEach(s=>s.delete()); }
     } else if(type==='cut') {
       if(!original) throw new Error('Carica prima un modello.');
       const planes=[...data.planes].sort((a,b)=>a-b);
