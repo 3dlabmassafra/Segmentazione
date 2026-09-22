@@ -7,5 +7,5 @@ await page.goto('http://localhost:5173');
 await page.waitForFunction(()=>document.querySelector('#loading').hidden,{timeout:60000});
 console.log('Parts',await page.locator('.part-card').count(),'Status',await page.locator('#engine-status').textContent(),'Toast',await page.locator('#toast').textContent());
 await page.screenshot({path:'/home/user/tests/desktop.png',fullPage:true});
-await page.locator('#export-all').click();
+await page.locator('#start-stroke').click();await page.keyboard.press('Escape');
 await browser.close();

@@ -36,7 +36,7 @@ const page=await browser.newPage({viewport:{width:1440,height:1100}});
 const errors=[];page.on('pageerror',e=>errors.push(e.message));
 const url=process.env.TEST_URL||'http://localhost:5173';
 const ready=()=>expect(page.locator('#loading')).toBeHidden({timeout:90000});
-await page.goto(url);await ready();
+await page.goto(url);await ready();await page.locator('[data-mode="curve"]').click();await page.locator('#apply-cuts').click();await ready();
 await expect(page.locator('.part-card')).toHaveCount(2);
 await expect(page.locator('[data-mode="curve"]')).toHaveClass('active');
 async function checkExport(expectedVolume){

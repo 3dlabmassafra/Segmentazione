@@ -1,104 +1,119 @@
-# Sezione — Studio di taglio 3D
+# Sezione — Studio di taglio 3D · v1.2
 
-Applicazione web in italiano per dividere modelli STL con tagli rettilinei o curvi. Versione 1.1. Interfaccia originale, ispirata alla categoria di strumenti di taglio multi-parte; non è una copia completa di Nativos Studio e non è affiliata al servizio.
+Applicazione web in italiano per dividere STL con percorsi disegnati direttamente sul modello. Interfaccia e implementazione originali: non è affiliata a STL Buddy o Nativos e non riproduce tutte le loro funzioni.
 
-## Avvio
+**Sito:** https://3dlabmassafra.github.io/Segmentazione/
 
-Richiede Node.js 20.19+ o 22.12+ e npm.
+## Novità: disegno a mano libera nella vista 3D
+
+La modalità iniziale **Disegna** acquisisce il percorso del mouse, non una curva Bézier predefinita a quattro punti:
+
+1. Importa un STL oppure usa il modello demo.
+2. Ruota il modello nella direzione desiderata. Puoi anche scegliere Vista 3D, Frontale, Laterale o Dall’alto.
+3. Seleziona **Curvo** (mano libera) oppure **Retto** (segmento).
+4. Premi **Posiziona un taglio**.
+5. Tieni premuto il pulsante sinistro del mouse, traccia una linea aperta attraverso il modello e rilascia. Anche il trascinamento touch è gestito con Pointer Events.
+6. Il tratto compare in **I tuoi tagli**. Puoi ruotare la vista e aggiungere altri tagli da angolazioni diverse.
+7. Premi **Anteprima divisa**, verifica le parti ed esporta gli STL singolarmente o in ZIP.
+
+La camera resta ferma durante il disegno. La superficie di taglio segue i raggi della camera: anche in prospettiva la proiezione del taglio corrisponde al tratto disegnato. Le estremità del percorso vengono prolungate automaticamente oltre il volume del modello. Lo stesso tratto può procedere anche indietro orizzontalmente, senza il vincolo di monotonicità della modalità Bézier.
+
+### Gestione dei tagli
+
+- Fino a **8 tagli** nello stesso progetto, anche da viste diverse.
+- Massimo **32 parti risultanti**, incluse le componenti scollegate.
+- Selezione di un taglio nell’elenco, ripristino della sua vista, ridisegno e regolazione della levigatura.
+- Attivazione/disattivazione ed eliminazione dei singoli tagli.
+- **Annulla** o `Ctrl/Cmd + Z` ripristina l’ultima modifica all’elenco (25 livelli).
+- **Esc** o il pulsante Annulla cancella il tratto in corso. Non interrompe un calcolo geometrico già avviato.
+- Wireframe, raggi X, griglia, vista esplosa e selezione delle parti.
+- Anteprima esplicita: gli export sono disattivati quando i tagli sono stati modificati ma non ancora applicati.
+
+### Altre modalità conservate
+
+- **Piani:** fino a 5 piani paralleli lungo X, Y o Z, posizionabili con slider o campi numerici.
+- **Bézier:** una curva cubica parametrica a quattro punti, con profili Onda, Arco e Valle e tre viste di disegno. È uno strumento separato dal nuovo disegno libero.
+
+Le modalità sono alternative: nella stessa operazione non vengono combinati tagli di modalità diverse.
+
+## Limiti espliciti
+
+- Importazione **STL ASCII o binario**, massimo **120 MB e 2.000.000 di triangoli**. Servono mesh chiuse, correttamente orientate; il programma non ripara buchi o auto-intersezioni arbitrarie.
+- Le coordinate STL sono interpretate come millimetri; il formato non specifica unità.
+- I percorsi a mano libera sono **aperti**, senza incroci con sé stessi o con i propri prolungamenti. Gli anelli chiusi vengono rifiutati con un messaggio. Tagli distinti, invece, possono intersecarsi.
+- I tratti sono discretizzati e possono essere leggermente levigati: non sono curve matematicamente esatte né superfici a doppia curvatura indipendenti dalla proiezione.
+- I tagli attivi attraversano tutte le parti che incontrano, non soltanto la parte selezionata.
+- **Non sono inclusi perni, incastri o tolleranze di accoppiamento automatiche.**
+- Un solido chiuso non è automaticamente stampabile senza supporti: verifica scala, spessori, orientamento, volume di stampa e supporti nello slicer.
+- I modelli densi possono richiedere molta RAM e tempo. È consigliato un browser desktop a 64 bit. I limiti indicati non garantiscono prestazioni uguali su ogni dispositivo o su qualsiasi mesh.
+- Non ci sono salvataggio automatico, importazione OBJ/3MF o ripristino di un progetto da file. Scarica gli export prima di chiudere o ricaricare la pagina.
+
+## Esportazione
+
+Ogni parte STL viene centrata in X/Y e appoggiata a Z = 0, senza rotazione automatica. La vista esplosa è solo una separazione visiva e non altera le coordinate esportate.
+
+Lo ZIP contiene gli STL numerati, `LEGGIMI.txt` e `profilo-taglio.json`. Quest’ultimo documenta vista, percorso e parametri dei tagli applicati, ma non è ancora reimportabile come progetto.
+
+## Elaborazione locale e memoria
+
+I file STL non vengono inviati a server. Rendering, geometria e download sono eseguiti nel browser; non servono account, backend, database o chiavi API. Le librerie, i font e il motore WASM sono serviti insieme al sito.
+
+La lettura binaria evita di duplicare i vettori normali dello STL. Prima di costruire il solido WASM, il worker indicizza i vertici esattamente coincidenti della triangle soup per ridurre l’uso di memoria: non è una decimazione della superficie. Per visualizzare mesh dense vengono calcolate normali smussate senza modificare vertici o triangoli.
+
+## Avvio locale
+
+Richiede Node.js **20.19+ oppure 22.12+** e npm.
 
 ```bash
 npm ci
 npm run dev
 ```
 
-Apri l'indirizzo mostrato nel terminale. Per una build di produzione:
+Apri l’URL mostrato nel terminale. Per la build di produzione alla radice di un hosting:
 
 ```bash
 npm run build
 npm run preview
 ```
 
-Il risultato di `npm run build` è nella cartella `dist/`: pubblicala alla radice di un hosting statico. Nell'archivio consegnato trovi anche `sito-pronto/`, una build già compilata da caricare su un hosting statico. Servono HTTP/HTTPS e supporto ai Web Worker e WebAssembly: non aprire `index.html` con doppio clic usando `file://`.
+Il risultato è in `dist/`. Sono necessari HTTP/HTTPS, WebGL, Web Worker e WebAssembly: non aprire l’HTML con doppio clic usando `file://`.
 
-Non sono necessari backend, database, account o chiavi API. Font, motore WASM e librerie sono serviti insieme al sito. L'applicazione non invia i file STL a server esterni. Non usa localStorage e non salva automaticamente il progetto: scarica le parti prima di chiudere o ricaricare la scheda.
-
-## Funzioni implementate
-
-- Importazione STL binario e ASCII con trascinamento o selezione file.
-- Controllo di validità del solido con Manifold WASM e saldatura dei vertici coincidenti tramite `Mesh.merge()`.
-- Limiti: 30 MB e 500.000 triangoli per file. La memoria disponibile dipende dal dispositivo.
-- Modello dimostrativo parametrico di un vaso a coste, generato localmente.
-- Taglio curvo Bézier con quattro punti di controllo modificabili direttamente sul modello, trascinamento, frecce della tastiera o coordinate numeriche.
-- Profili iniziali Onda, Arco e Valle, con viste frontale, laterale e dall’alto.
-- La curva viene estesa attraverso tutta la profondità del modello: il taglio genera due solidi con superfici curve corrispondenti.
-- In modalità rettilinea: fino a 5 piani paralleli sull’asse X, Y o Z (fino a 6 sezioni).
-- Posizione dei piani tramite slider o campo numerico, relativa al limite inferiore del modello sull'asse selezionato.
-- Tagli geometrici reali con chiusura delle superfici, calcolati in un Web Worker per non bloccare l'interfaccia.
-- Rotazione, zoom, selezione delle parti, wireframe, griglia, vista dall'alto e vista esplosa.
-- Anteprime delle singole parti, dimensioni e conteggio triangoli.
-- Download STL binario individuale o archivio ZIP con tutti gli STL e istruzioni.
-- Layout adattabile per desktop, tablet e smartphone; guida integrata.
-
-## Flusso d'uso
-
-1. Il sito apre un vaso dimostrativo già diviso in due parti con un taglio curvo.
-2. Importa il tuo STL: la mesh viene centrata in X/Y e appoggiata a Z = 0. Viene applicato il taglio della modalità selezionata (curvo per impostazione iniziale, oppure due piani uniformi lungo Z in modalità rettilinea).
-3. Per un taglio curvo scegli la vista, poi **Modifica curva sul modello**: trascina P0–P3 oppure usa le coordinate. P0/P3 sono gli estremi, P1/P2 modellano la curvatura. Gli estremi restano fuori dai bordi. In modalità rettilinea puoi scegliere l’asse e aggiungere/rimuovere i piani.
-4. Premi **Applica taglio curvo** o **Taglia** nell’editor (oppure **Applica tagli** in modalità rettilinea). Gli export sono disattivati finché i piani modificati non sono stati applicati.
-5. Usa **Esporta tutte le parti** o l'icona di download su una singola parte.
-
-Scorciatoie: `R` centra il modello, `W` attiva/disattiva il wireframe, `Invio` applica i tagli modificati quando il focus non è su un campo o un pulsante, `Ctrl/Cmd + O` apre un STL.
-
-## Limiti e note per la stampa
-
-- Questa versione non genera incastri, spine, tolleranze o connettori automatici.
-- La modalità curva applica una sola Bézier cubica per operazione, non un tratto a mano libera né una rete di curve. La curva procede da sinistra a destra senza tornare indietro; i controlli orizzontali sono vincolati per evitare auto-intersezioni.
-- Il profilo 2D viene estruso lungo X, Y o Z: non è una superficie a doppia curvatura. La mesh triangolata usa 256 segmenti per approssimare la Bézier. Non sono disponibili tagli sequenziali su parti selezionate: per un ulteriore taglio puoi esportare una parte e reimportarla.
-- Non supporta piani obliqui, assi misti nello stesso passaggio o importazione OBJ/3MF. Il file `profilo-taglio.json` incluso nello ZIP documenta i parametri, ma non può ancora essere reimportato come progetto.
-- I file STL non contengono unità: tutte le coordinate sono interpretate come millimetri.
-- Sono richieste mesh chiuse e correttamente orientate. La saldatura dei vertici non ripara automaticamente buchi, auto-intersezioni o geometrie arbitrarie. Verifica sempre anche nel tuo slicer.
-- Una sezione può contenere più componenti scollegate. Un piano in un vuoto non produce una parte vuota esportabile: il numero di parti può essere inferiore a quello teorico.
-- Le parti esportate sono centrate separatamente in X/Y e appoggiate a Z = 0, senza rotazione automatica. La vista esplosa è solo visiva.
-- «Solido chiuso» non significa che la parte si possa stampare senza supporti o ulteriori verifiche. Controlla volume di stampa, spessori, scala, orientamento e supporti nel tuo slicer.
-- Il modello demo ha una parete di circa 3 mm. La stampabilità delle nervature dipende dalle impostazioni della stampante.
-
-## Tecnologie
-
-- Three.js per visualizzazione 3D, import ed export STL.
-- Manifold 3D / WebAssembly per solidi e tagli topologici.
-- Web Worker per l'elaborazione geometrica.
-- fflate per esportazione ZIP.
-- Lucide per le icone, DM Sans e Manrope per i font locali.
-- Vite per sviluppo e build.
-
-## Verifiche
-
-```bash
-npx playwright install --with-deps chromium
-# Con il dev server avviato sulla porta 5173:
-node tests/functional.mjs
-node tests/curved.mjs
-```
-
-Il test controlla l'esportazione del demo, l'importazione di un cubo, tagli su tutti e tre gli assi, validità manifold degli STL riesportati, conservazione del volume, aggiunta/rimozione piani, rifiuto di un file non valido senza perdere il modello precedente, download ZIP, comandi di visualizzazione e assenza di overflow orizzontale su mobile.
-
-I test dei tagli curvi verificano tutte le 9 combinazioni di profilo e vista, la non planarità del bordo risultante, la conservazione del volume, le mesh esportate, il trascinamento dei punti, i campi numerici, l’editor responsive e il ritorno ai tagli rettilinei.
-
-I test automatici non sostituiscono una validazione completa su qualsiasi mesh. I file dei test generati e gli screenshot non sono necessari per pubblicare il sito.
-
-## Pubblicazione su GitHub Pages
+## GitHub Pages
 
 Repository: https://github.com/3dlabmassafra/Segmentazione
 
-URL previsto dopo il deploy: https://3dlabmassafra.github.io/Segmentazione/
+Il workflow `.github/workflows/deploy-pages.yml` pubblica a ogni push su `main`. In **Settings → Pages → Source** deve essere selezionato **GitHub Actions**.
 
-Il workflow `.github/workflows/deploy-pages.yml` compila e pubblica automaticamente a ogni push sul branch `main`. Nel repository, **Settings → Pages → Build and deployment → Source** deve essere impostato su **GitHub Actions**.
-
-Il workflow imposta `VITE_BASE_PATH=/Segmentazione/`, necessario per caricare correttamente script, font, worker e WASM sotto il percorso del repository. Per testare localmente la stessa configurazione:
+Il workflow imposta `VITE_BASE_PATH=/Segmentazione/`. Per testare lo stesso percorso localmente:
 
 ```bash
 VITE_BASE_PATH=/Segmentazione/ npm run build
 VITE_BASE_PATH=/Segmentazione/ npm run preview
 ```
 
-Se cambi nome al repository, aggiorna `VITE_BASE_PATH` nel workflow. Non inserire mai password o token nel codice o nei file versionati.
+Se cambi nome al repository, aggiorna il percorso nel workflow. Non inserire password o token nei file versionati.
+
+## Tecnologie
+
+Three.js · Manifold 3D / WebAssembly · Web Worker · fflate · Lucide · DM Sans / Manrope · Vite.
+
+## Test
+
+Con il dev server avviato sulla porta 5173:
+
+```bash
+npx playwright install --with-deps chromium
+node tests/freehand.mjs
+node tests/functional.mjs
+node tests/curved.mjs
+```
+
+Il test mano libera verifica acquisizione reale del mouse, più tagli da viste diverse, corrispondenza prospettica, conservazione del volume, solidi chiusi negli STL esportati, metadati, annullamento, attivazione/disattivazione e layout mobile. Gli altri test coprono piani e Bézier.
+
+Test opzionale più oneroso, con un rilievo sintetico di **1.085.760 triangoli in ingresso**:
+
+```bash
+node tests/dense-mesh.mjs
+```
+
+Genera un STL temporaneo di circa 54 MB, verifica importazione e taglio a mano libera, poi lo elimina. Questo test non equivale a una verifica sullo specifico modello del cliente. I test automatici non garantiscono la validità di qualsiasi mesh importata.

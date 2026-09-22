@@ -1,3 +1,4 @@
+import {splitFreehand} from './freehand-math.js';
 import { splitCurved } from './curve-math.js';
 import Module from 'manifold-3d';
 import wasmUrl from 'manifold-3d/manifold.wasm?url';
@@ -8,6 +9,22 @@ function pack(solid) {
   const positions = new Float32Array(m.numVert * 3);
   for(let i=0;i<m.numVert;i++) for(let a=0;a<3;a++) positions[3*i+a] = m.vertProperties[m.numProp*i+a];
   return {positions, indices: new Uint32Array(m.triVerts), bounds:solid.boundingBox(), volume:solid.volume(), triangles:solid.numTri()};
+}
+// STL repeats vertices for every triangle. Index exact duplicates before
+// entering WASM: this preserves geometry and avoids a huge triangle-soup mesh.
+function indexPositions(positions) {
+  const n=positions.length/3;
+  const sorted=new Uint32Array(n);for(let i=0;i<n;i++)sorted[i]=i;
+  sorted.sort((a,b)=>positions[3*a]-positions[3*b]||positions[3*a+1]-positions[3*b+1]||positions[3*a+2]-positions[3*b+2]);
+  const vertices=new Float32Array(positions.length),triangles=new Uint32Array(n);
+  let count=0,last=-1;
+  for(const i of sorted){
+    if(last<0||positions[3*i]!==positions[3*last]||positions[3*i+1]!==positions[3*last+1]||positions[3*i+2]!==positions[3*last+2]){
+      vertices[3*count]=positions[3*i];vertices[3*count+1]=positions[3*i+1];vertices[3*count+2]=positions[3*i+2];count++;
+    }
+    triangles[i]=count-1;last=i;
+  }
+  return {positions:vertices.slice(0,count*3),indices:triangles};
 }
 function validate(solid) {
   if(solid.status() !== 'NoError' || solid.isEmpty() || solid.volume() <= 0) {
@@ -40,9 +57,9 @@ self.onmessage = async ({data}) => {
       let next;
       if(type==='demo') next=demo();
       else {
-        if(!data.positions.length || data.positions.length>4500000 || !data.positions.every(Number.isFinite)) throw new Error('STL vuoto, non valido o oltre il limite di 500.000 triangoli.');
-        const n=data.positions.length/3;
-        const mesh=new lib.Mesh({numProp:3,vertProperties:data.positions,triVerts:Uint32Array.from({length:n},(_,i)=>i)});
+        if(!data.positions.length || data.positions.length>18000000 || !data.positions.every(Number.isFinite)) throw new Error('STL vuoto, non valido o oltre il limite di 2.000.000 triangoli.');
+        const indexed=indexPositions(data.positions);
+        const mesh=new lib.Mesh({numProp:3,vertProperties:indexed.positions,triVerts:indexed.indices});
         mesh.merge();
         try {next=new lib.Manifold(mesh);} catch(e) {throw new Error('La mesh non è chiusa o contiene geometrie non valide. Ripara il file STL nel tuo slicer prima di importarlo.');}
       }
@@ -55,6 +72,11 @@ self.onmessage = async ({data}) => {
       if(original) original.delete();
       original=normalized;
       self.postMessage({id,result:pack(original)});
+    } else if(type==='freehand-cut') {
+      if(!original) throw new Error('Carica prima un modello.');
+      const solids=splitFreehand(lib,original,data.cuts);
+      try { self.postMessage({id,result:solids.map(pack)}); }
+      finally { solids.forEach(s=>{if(s!==original)s.delete();}); }
     } else if(type==='curve-cut') {
       if(!original) throw new Error('Carica prima un modello.');
       const solids=splitCurved(lib,original,data.curve);

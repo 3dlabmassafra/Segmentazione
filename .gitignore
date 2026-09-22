@@ -15,3 +15,6 @@ test-results/
 
 .npm/
 .sudo_as_admin_successful
+
+# Private user attachments
+uploads/
