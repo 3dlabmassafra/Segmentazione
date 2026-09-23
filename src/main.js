@@ -1,5 +1,6 @@
 import './style.css';
 import {createFreehandEditor} from './freehand-editor.js';
+import {buildBVH, raycastMesh} from './mesh-bvh.js';
 import {FRAMES, newCurve, curveSamples, localToWorld} from './curve-math.js';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
@@ -15,7 +16,7 @@ const $$=s=>[...document.querySelectorAll(s)];
 const refreshIcons=()=>createIcons({icons,attrs:{'stroke-width':1.7}});
 refreshIcons();
 const palette=['#bdcec5','#cdb6a4','#b1c2dd','#d8cae0','#d7ceab','#a5c8ca'];
-const state={mode:'freehand',appliedMode:'freehand',freeCuts:[],appliedFreeCuts:[],freeHistory:[],freeSelected:null,strokeKind:'curve',drawing:false,xray:false,curve:newCurve(),appliedCurve:null,editing:false,curvePoint:1,original:null,parts:[],axis:2,appliedAxis:2,planes:[60,120],appliedPlanes:[],name:'Vaso Onda',demo:true,busy:true,dirty:false,selected:-1,wire:false};
+const state={picking:null,pickingBuilding:false,pendingDraw:null,mode:'freehand',appliedMode:'freehand',freeCuts:[],appliedFreeCuts:[],freeHistory:[],freeSelected:null,strokeKind:'curve',drawing:false,xray:false,curve:newCurve(),appliedCurve:null,editing:false,curvePoint:1,original:null,parts:[],axis:2,appliedAxis:2,planes:[60,120],appliedPlanes:[],name:'Vaso Onda',demo:true,busy:true,dirty:false,selected:-1,wire:false};
 let toastTimer;
 let freehand;
 function toast(message,error=false){const el=$('#toast');el.querySelector('span').textContent=message;el.classList.toggle('error',error);el.classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(()=>el.classList.remove('show'),error?8500:4500);}
@@ -47,14 +48,41 @@ const key=new THREE.DirectionalLight(0xfff6ea,3.2);key.position.set(-250,-300,42
 const fill=new THREE.DirectionalLight(0xe6edff,1.5);fill.position.set(250,120,200);scene.add(fill);
 const rim=new THREE.DirectionalLight(0xffffff,2);rim.position.set(0,250,400);scene.add(rim);
 const group=new THREE.Group();scene.add(group);const planesGroup=new THREE.Group();scene.add(planesGroup);
+// Pointer samples are found with the same ray caster the worker uses for the
+// cuts, so what is drawn is exactly what gets cut. It is built once the model is
+// in place, right after the first frame.
+function buildPicking(){
+  if(!state.original||state.pickingBuilding)return;
+  state.pickingBuilding=true;
+  const positions=state.original.positions,indices=state.original.indices;
+  const finish=()=>{
+    try{
+      const bvh=buildBVH(positions,indices);
+      state.picking=(from,direction)=>raycastMesh(bvh,from,direction);
+    }catch(e){state.picking=null;}
+    state.pickingBuilding=false;
+    // The pointer may have asked to draw before the tree was ready: start now.
+    if(state.pendingDraw){
+      const id=state.pendingDraw===true?null:state.pendingDraw;
+      state.pendingDraw=null;
+      if(state.picking)freehand&&freehand.start(id);
+    }
+  };
+  // Small and medium meshes are ready straight away, so the first stroke is
+  // never lost. Dense ones keep the idle build with an explicit wait.
+  const triangles=indices?indices.length/3:positions?positions.length/9:0;
+  if(triangles<=300000)finish();
+  else if(window.requestIdleCallback)window.requestIdleCallback(finish,{timeout:2000});
+  else setTimeout(finish,0);
+}
 let grid;
 const shadowCanvas=document.createElement('canvas');shadowCanvas.width=shadowCanvas.height=128;const ctx=shadowCanvas.getContext('2d');const grad=ctx.createRadialGradient(64,64,0,64,64,64);grad.addColorStop(0,'rgba(63,78,99,0.20)');grad.addColorStop(.45,'rgba(63,78,99,0.09)');grad.addColorStop(1,'rgba(63,78,99,0)');ctx.fillStyle=grad;ctx.fillRect(0,0,128,128);
 const shadow=new THREE.Mesh(new THREE.PlaneGeometry(1,1),new THREE.MeshBasicMaterial({map:new THREE.CanvasTexture(shadowCanvas),transparent:true,depthWrite:false}));shadow.position.z=-.3;scene.add(shadow);
-const ro=new ResizeObserver(()=>{const {width,height}=container.getBoundingClientRect();renderer.setSize(width,height);camera.aspect=width/height;camera.updateProjectionMatrix();if(state.editing)updateCurveCamera();if(state.drawing)freehand?.cancel();});ro.observe(container);
-renderer.setAnimationLoop(()=>{if(!state.drawing)controls.update();renderer.render(scene,state.editing?curveCamera:camera);});
+const ro=new ResizeObserver(()=>{const {width,height}=container.getBoundingClientRect();renderer.setSize(width,height);camera.aspect=width/height;camera.updateProjectionMatrix();if(state.editing)updateCurveCamera();});ro.observe(container);
+renderer.setAnimationLoop(()=>{controls.update();renderer.render(scene,state.editing?curveCamera:camera);});
 function geometryFor(part){let g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.BufferAttribute(part.positions,3));g.setIndex(new THREE.BufferAttribute(part.indices,1));if(part.triangles>200000){g.computeVertexNormals();return g;}const smooth=toCreasedNormals(g,Math.PI/3);if(smooth!==g)g.dispose();return smooth;}
 function disposeGroup(g){while(g.children.length){const child=g.children[0];child.traverse(o=>{o.geometry?.dispose();if(o.material){const mats=Array.isArray(o.material)?o.material:[o.material];mats.forEach(m=>{m.map?.dispose();m.dispose();});}});g.remove(child);}}
-function drawParts(){disposeGroup(group);const preview=state.editing||state.dirty||state.drawing;const parts=preview&&state.original?[state.original]:state.parts;parts.forEach((part,i)=>{const mesh=new THREE.Mesh(geometryFor(part),new THREE.MeshStandardMaterial({color:preview?'#c9d1df':palette[i%palette.length],roughness:.74,metalness:.04,wireframe:state.wire}));mesh.userData.part=preview?-1:i;group.add(mesh);});updateExplosion();updateSelection();updateXray();}
+function drawParts(){disposeGroup(group);const preview=state.editing||(state.dirty&&!state.drawing);const parts=preview&&state.original?[state.original]:state.parts;parts.forEach((part,i)=>{const mesh=new THREE.Mesh(geometryFor(part),new THREE.MeshStandardMaterial({color:preview?'#c9d1df':palette[i%palette.length],roughness:.74,metalness:.04,wireframe:state.wire}));mesh.userData.part=preview?-1:i;group.add(mesh);});updateExplosion();updateSelection();updateXray();}
 function setGrid(){if(grid){scene.remove(grid);grid.geometry.dispose();grid.material.dispose();}const d=sizeOf(state.original.bounds);const size=Math.max(...d)*3;grid=new THREE.GridHelper(size,30,0xc4cedd,0xdde3ec);grid.rotation.x=Math.PI/2;grid.position.z=-.6;grid.material.transparent=true;grid.material.opacity=.36;grid.material.depthWrite=false;grid.visible=$('#grid-view').classList.contains('active');scene.add(grid);shadow.scale.set(Math.max(d[0],d[1])*2.1,Math.max(d[0],d[1])*2.1,1);}
 function gap(){return $('#explode').checked?Number($('#separation').value):0;}
 function updateExplosion(){
@@ -82,7 +110,7 @@ $$('[data-axis]').forEach(button=>button.addEventListener('click',()=>{if(state.
 $('#add-plane').onclick=()=>{if(state.busy||state.planes.length>=5)return;const b=state.original.bounds;const all=[b.min[state.axis],...state.planes,b.max[state.axis]].sort((a,b)=>a-b);let index=0;for(let i=1;i<all.length-1;i++)if(all[i+1]-all[i]>all[index+1]-all[index])index=i;state.planes.push((all[index]+all[index+1])/2);state.planes.sort((a,b)=>a-b);renderPlaneControls();markDirty();};
 
 const thumbRenderer=new THREE.WebGLRenderer({antialias:true,alpha:true,preserveDrawingBuffer:true});thumbRenderer.setSize(150,150);thumbRenderer.setPixelRatio(1);thumbRenderer.toneMapping=THREE.ACESFilmicToneMapping;thumbRenderer.toneMappingExposure=1.35;
-function thumbnail(part,color){const s=new THREE.Scene();s.add(new THREE.HemisphereLight(0xffffff,0xbdc4d0,2.8));const l=new THREE.DirectionalLight(0xffffff,3);l.position.set(-3,-4,7);s.add(l);const mesh=new THREE.Mesh(geometryFor(part),new THREE.MeshStandardMaterial({color,roughness:.8}));s.add(mesh);const box=new THREE.Box3().setFromObject(mesh),center=box.getCenter(new THREE.Vector3()),size=box.getSize(new THREE.Vector3());const cam=new THREE.PerspectiveCamera(33,1,.01,100000);cam.up.set(0,0,1);cam.position.copy(center).add(new THREE.Vector3(1,-1.6,1.25).normalize().multiplyScalar(Math.max(...size.toArray())*2.5));cam.lookAt(center);thumbRenderer.render(s,cam);const url=thumbRenderer.domElement.toDataURL('image/png');mesh.geometry.dispose();mesh.material.dispose();return url;}
+function thumbnail(part,color){if(part.triangles>600000){const c=document.createElement('canvas');c.width=c.height=96;const g=c.getContext('2d');g.fillStyle=color;g.beginPath();g.arc(48,48,30,0,Math.PI*2);g.fill();g.fillStyle='#ffffffb0';g.font='600 11px sans-serif';g.textAlign='center';g.fillText('MOLTO DENSE',48,52);return c.toDataURL('image/png');}const s=new THREE.Scene();s.add(new THREE.HemisphereLight(0xffffff,0xbdc4d0,2.8));const l=new THREE.DirectionalLight(0xffffff,3);l.position.set(-3,-4,7);s.add(l);const mesh=new THREE.Mesh(geometryFor(part),new THREE.MeshStandardMaterial({color,roughness:.8}));s.add(mesh);const box=new THREE.Box3().setFromObject(mesh),center=box.getCenter(new THREE.Vector3()),size=box.getSize(new THREE.Vector3());const cam=new THREE.PerspectiveCamera(33,1,.01,100000);cam.up.set(0,0,1);cam.position.copy(center).add(new THREE.Vector3(1,-1.6,1.25).normalize().multiplyScalar(Math.max(...size.toArray())*2.5));cam.lookAt(center);thumbRenderer.render(s,cam);const url=thumbRenderer.domElement.toDataURL('image/png');mesh.geometry.dispose();mesh.material.dispose();return url;}
 function renderResults(){const count=state.parts.length;$('#parts-count').textContent=count;$('#export-count').textContent=count;$('#total-parts').textContent=count;$('#results-status').textContent='Pronte per il prossimo passo';$('#parts-list').innerHTML=state.parts.map((p,i)=>`<article class="part-card" data-select="${i}" tabindex="0" role="button" aria-label="Seleziona parte ${i+1}"><div class="part-top"><img class="part-thumbnail" alt="Anteprima parte ${i+1}" src="${thumbnail(p,palette[i%palette.length])}"><div class="part-info"><h3><i style="background:${palette[i%palette.length]}"></i>Parte ${String(i+1).padStart(2,'0')}</h3><p>${dimensions(p.bounds)} mm</p><p class="part-triangles">${num(p.triangles)} triangoli</p></div><button class="part-download" data-download="${i}" title="Scarica parte ${i+1}" aria-label="Scarica parte ${i+1} in STL"><i data-lucide="download"></i></button></div><div class="part-bottom"><span><i data-lucide="circle-check"></i> Solido chiuso</span><b>STL · ${fmt((84+p.triangles*50)/1024)} KB</b></div></article>`).join('');$('.viewport-legend').innerHTML=state.parts.map((p,i)=>`<span><i style="background:${palette[i%palette.length]}"></i>Parte ${String(i+1).padStart(2,'0')}</span>`).join('');$('#triangle-count').textContent=`${num(state.parts.reduce((n,p)=>n+p.triangles,0))} triangoli`;refreshIcons();updateButtons();}
 function updateSelection(){group.children.forEach((m,i)=>{m.material.emissive.set(m.userData.part>=0&&m.userData.part===state.selected?0x263c6e:0x000000);m.material.emissiveIntensity=.15;});$$('[data-select]').forEach(card=>{const active=Number(card.dataset.select)===state.selected;card.classList.toggle('selected',active);card.setAttribute('aria-pressed',String(active));});}
 function selectPart(i){state.selected=state.selected===i?-1:i;updateSelection();}
@@ -90,23 +118,30 @@ $('#parts-list').onclick=e=>{const download=e.target.closest('[data-download]');
 $('#parts-list').onkeydown=e=>{if(e.target.matches('[data-select]')&&(e.key==='Enter'||e.key===' ')){e.preventDefault();selectPart(Number(e.target.dataset.select));}};
 let pointerDown;renderer.domElement.addEventListener('pointerdown',e=>pointerDown=[e.clientX,e.clientY]);renderer.domElement.addEventListener('pointerup',e=>{if(state.drawing||state.editing||!pointerDown||Math.hypot(e.clientX-pointerDown[0],e.clientY-pointerDown[1])>5)return;const r=renderer.domElement.getBoundingClientRect();const ray=new THREE.Raycaster();ray.setFromCamera(new THREE.Vector2((e.clientX-r.left)/r.width*2-1,-(e.clientY-r.top)/r.height*2+1),camera);const hit=ray.intersectObjects(group.children)[0];if(hit&&hit.object.userData.part>=0)selectPart(hit.object.userData.part);else{state.selected=-1;updateSelection();}});
 
-async function cut(fit=false){
-  if(!state.original)return;
-  loading(true,state.mode==='curve'?'Calcolo del taglio curvo e chiusura delle superfici…':'Taglio e chiusura delle superfici…');
+async function cut(options={}){
+  const {quiet=false,fit=false}=typeof options==='boolean'?{fit:options}:options;
+  if(!state.original)return false;
+  // The parts already match the current cuts: skip the whole recomputation
+  // (on dense models it is expensive) instead of running it twice.
+  if(!state.dirty&&state.parts.length&&state.appliedMode===state.mode){if(fit)fitView();return true;}
+  if(!quiet)loading(true,state.mode==='curve'?'Calcolo del taglio curvo e chiusura delle superfici…':state.mode==='freehand'?'Calcolo del taglio sulla superficie…':'Taglio e chiusura delle superfici…');
   try{
-    const parts=await request(state.mode==='freehand'?'freehand-cut':state.mode==='curve'?'curve-cut':'cut',state.mode==='freehand'?{cuts:state.freeCuts}:state.mode==='curve'?{curve:state.curve}:{axis:state.axis,planes:state.planes});
+    const parts=await request(state.mode==='freehand'?'surface-cut':state.mode==='curve'?'curve-cut':'cut',state.mode==='freehand'?{cuts:state.freeCuts.filter(cut=>cut.enabled!==false).map(cut=>({name:cut.name,enabled:cut.enabled,...freehand.payload(cut)}))}:state.mode==='curve'?{curve:state.curve}:{axis:state.axis,planes:state.planes});
     if(!parts.length)throw new Error('Nessuna parte generata. Controlla il taglio.');
-    state.parts=parts;state.appliedMode=state.mode;state.appliedFreeCuts=state.mode==='freehand'?structuredClone(state.freeCuts):[];
+    state.parts=parts;state.appliedMode=state.mode;state.appliedFreeCuts=state.mode==='freehand'?structuredClone(state.freeCuts.map(cut=>({...cut,strokes:cut.strokes}))):[];
     state.appliedAxis=state.mode==='curve'?FRAMES[state.curve.frame].v:state.axis;
     state.appliedCurve=state.mode==='curve'?structuredClone(state.curve):null;
     state.appliedPlanes=[...state.planes];state.dirty=false;state.selected=-1;
     const wasEditing=state.editing;setCurveEditing(false,false);
     $('#dirty-banner').hidden=true;drawParts();renderResults();freehand?.sync();if(state.mode==='freehand'&&!state.freeCuts.length)$('#results-status').textContent='Modello intero · disegna il primo taglio';
     if(fit||wasEditing)fitView();return true;
-  }catch(e){toast(e.message,true);return false;}finally{loading(false);}
+  }catch(e){
+    if(!quiet)toast(e.message,true);
+    return false;
+  }finally{if(!quiet)loading(false);}
 }
 $('#apply-cuts').onclick=async()=>{if(state.busy||state.drawing)return;if(await cut())toast(`${state.parts.length} parti generate. Le superfici di taglio sono chiuse.`);};
-async function loadModel(type,positions=null,file=null){if(state.busy&&state.original)return;loading(true,type==='demo'?'Diamo forma al tuo primo progetto…':'Controllo della mesh STL…');try{const original=await request(type,positions?{positions}:{});state.original=original;freehand?.reset();state.demo=type==='demo';state.name=file?file.name.replace(/\.stl$/i,''):'Vaso Onda';state.axis=2;state.curve=newCurve();setCurveEditing(false,false);syncCurveUI();state.planes=[original.bounds.max[2]/3,original.bounds.max[2]*2/3];state.dirty=true;$('#file-name').textContent=state.name+'.stl';$('#file-meta').textContent=file?`${fmt(file.size/1024/1024)} MB · ${num(original.triangles)} triangoli`:'Modello dimostrativo';$('#model-size').textContent=dimensions(original.bounds)+' mm';$('#model-title').textContent=state.name;$('#project-title').textContent=state.demo?'Progetto senza titolo':state.name;$('#caption-kind').textContent=state.demo?'MODELLO DEMO':'IL TUO MODELLO';$('#model-subtitle').textContent=state.demo?'Un’unica forma, infinite possibilità.':'Il tuo prossimo progetto inizia qui.';$$('[data-axis]').forEach(b=>b.classList.toggle('active',Number(b.dataset.axis)===2));$('#axis-description').textContent='Verticale';$('#explode').checked=true;$('#separation').disabled=false;$('#separation').value=Math.min(18,Math.round(original.bounds.max[2]*.1));$('#separation-value').textContent=$('#separation').value;setGrid();renderPlaneControls();await cut(true);if(type==='import')toast('Modello importato. Personalizza il profilo del taglio.');}catch(e){toast(e.message,true);}finally{loading(false);}}
+async function loadModel(type,positions=null,file=null){if(state.busy&&state.original)return;loading(true,type==='demo'?'Diamo forma al tuo primo progetto…':'Controllo della mesh STL…');try{const original=await request(type,positions?{positions}:{});state.original=original;state.picking=null;state.pendingDraw=null;freehand?.reset();state.demo=type==='demo';state.name=file?file.name.replace(/\.stl$/i,''):'Vaso Onda';state.axis=2;state.curve=newCurve();setCurveEditing(false,false);syncCurveUI();state.planes=[original.bounds.max[2]/3,original.bounds.max[2]*2/3];state.dirty=true;$('#file-name').textContent=state.name+'.stl';$('#file-meta').textContent=file?`${fmt(file.size/1024/1024)} MB · ${num(original.triangles)} triangoli`:'Modello dimostrativo';$('#model-size').textContent=dimensions(original.bounds)+' mm';$('#model-title').textContent=state.name;$('#project-title').textContent=state.demo?'Progetto senza titolo':state.name;$('#caption-kind').textContent=state.demo?'MODELLO DEMO':'IL TUO MODELLO';$('#model-subtitle').textContent=state.demo?'Un’unica forma, infinite possibilità.':'Il tuo prossimo progetto inizia qui.';$$('[data-axis]').forEach(b=>b.classList.toggle('active',Number(b.dataset.axis)===2));$('#axis-description').textContent='Verticale';$('#explode').checked=true;$('#separation').disabled=false;$('#separation').value=Math.min(18,Math.round(original.bounds.max[2]*.1));$('#separation-value').textContent=$('#separation').value;setGrid();renderPlaneControls();buildPicking();await cut({fit:true});if(type==='import')toast('Modello importato. Personalizza il profilo del taglio.');}catch(e){toast(e.message,true);}finally{loading(false);}}
 async function importFile(file){if(!file||state.busy)return;if(!file.name.toLowerCase().endsWith('.stl')){toast('Scegli un file STL binario o ASCII.',true);return;}if(file.size>120*1024*1024){toast('Il limite è 120 MB per file.',true);return;}try{const buffer=await file.arrayBuffer();let positions;
 const view=new DataView(buffer);const triangles=buffer.byteLength>=84?view.getUint32(80,true):0;
 if(triangles&&84+50*triangles===buffer.byteLength){
@@ -128,7 +163,11 @@ $('#export-all').onclick=()=>{if(state.busy||state.dirty||!state.parts.length)re
 const dialog=$('#guide-dialog');$('#help').onclick=$('#export-help').onclick=()=>dialog.showModal();$('#close-guide').onclick=$('#start-working').onclick=()=>dialog.close();dialog.addEventListener('click',e=>{if(e.target===dialog){const r=dialog.getBoundingClientRect();if(e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom)dialog.close();}});
 window.addEventListener('keydown',e=>{if(dialog.open||state.drawing)return;if(e.key==='Escape'&&state.editing){setCurveEditing(false);return;}if((e.ctrlKey||e.metaKey)&&e.key==='o'){e.preventDefault();if(!state.busy)$('#file-input').click();return;}if(e.target.matches('input,textarea,button,select')||e.target.closest('[data-curve-point]')||state.busy)return;if(e.key.toLowerCase()==='r')fitView();if(e.key.toLowerCase()==='w')setWire(!state.wire);if(e.key==='Enter'&&state.dirty)$('#apply-cuts').click();});
 setupCurveEditor();
-freehand=createFreehandEditor({THREE,state,$,$$,container,camera,controls,planesGroup,toast,markDirty,drawParts,updatePlanes,fitView,refreshIcons,updateXray});
+function previewCuts(options={}){
+  if(state.busy)return Promise.resolve(false);
+  return cut({quiet:true,...options});
+}
+freehand=createFreehandEditor({THREE,state,$,$$,canvas:renderer.domElement,container,camera,controls,planesGroup,toast,markDirty,drawParts,updatePlanes,fitView,refreshIcons,previewCuts});
 syncCurveUI();
 loadModel('demo');
 

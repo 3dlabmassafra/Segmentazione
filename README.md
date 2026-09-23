@@ -1,4 +1,4 @@
-# Sezione — Studio di taglio 3D · v1.2
+# Sezione — Studio di taglio 3D · v1.3
 
 Applicazione web in italiano per dividere STL con percorsi disegnati direttamente sul modello. Interfaccia e implementazione originali: non è affiliata a STL Buddy o Nativos e non riproduce tutte le loro funzioni.
 
@@ -12,11 +12,12 @@ La modalità iniziale **Disegna** acquisisce il percorso del mouse, non una curv
 2. Ruota il modello nella direzione desiderata. Puoi anche scegliere Vista 3D, Frontale, Laterale o Dall’alto.
 3. Seleziona **Curvo** (mano libera) oppure **Retto** (segmento).
 4. Premi **Posiziona un taglio**.
-5. Tieni premuto il pulsante sinistro del mouse, traccia una linea aperta attraverso il modello e rilascia. Anche il trascinamento touch è gestito con Pointer Events.
-6. Il tratto compare in **I tuoi tagli**. Puoi ruotare la vista e aggiungere altri tagli da angolazioni diverse.
-7. Premi **Anteprima divisa**, verifica le parti ed esporta gli STL singolarmente o in ZIP.
+5. Tieni premuto il pulsante sinistro del mouse e traccia un tratto direttamente sulla superficie del modello, poi rilascia. Anche il trascinamento touch è gestito con Pointer Events.
+6. **Gira intorno all'oggetto** (trascina con il tasto destro o con due dita) e continua lo stesso taglio sulle facce successive: i tratti si collegano da soli, in qualsiasi direzione tu abbia disegnato.
+7. Quando il percorso chiude l'anello attorno al modello, il banner mostra **Anello chiuso attorno al modello** e l'anteprima si aggiorna da sola in due parti con superfici di taglio chiuse.
+8. Premi **Chiudi il taglio** per uscire dalla modalità di disegno, poi esporta gli STL singolarmente o in ZIP. Puoi anche tracciare più anelli indipendenti (fino a 8 tagli, 32 parti).
 
-La camera resta ferma durante il disegno. La superficie di taglio segue i raggi della camera: anche in prospettiva la proiezione del taglio corrisponde al tratto disegnato. Le estremità del percorso vengono prolungate automaticamente oltre il volume del modello. Lo stesso tratto può procedere anche indietro orizzontalmente, senza il vincolo di monotonicità della modalità Bézier.
+Il tratto è campionato sulla superficie reale del modello (stesso motore di raycast del calcolo geometrico): ciò che disegni è esattamente ciò che viene tagliato, in qualsiasi vista. Le estremità di ogni tratto vengono prolungate automaticamente oltre il volume, così il taglio attraversa sempre tutto il materiale. Un tratto che non divide il modello viene rifiutato con un messaggio chiaro, senza toccare le parti già calcolate.
 
 ### Gestione dei tagli
 

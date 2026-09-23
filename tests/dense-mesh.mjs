@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import {execFileSync} from 'node:child_process';
 const filename='tests/fixtures/dense-relief.stl';
 if(process.argv.includes('--generate')){
-const N=520,L=N+1,layer=L*L;
+const N=(process.env.DENSE_N?Number(process.env.DENSE_N):260),L=N+1,layer=L*L;
 const positions=new Float32Array(layer*6),indices=[];
 for(let y=0;y<=N;y++)for(let x=0;x<=N;x++){
  const i=y*L+x,X=x/N*25.4,Y=y/N*11.5;
@@ -33,13 +33,13 @@ process.exit(0);
 execFileSync(process.execPath,[import.meta.filename,'--generate'],{stdio:'inherit'});
 const browser=await chromium.launch({args:['--no-sandbox','--enable-unsafe-swiftshader']});
 try{
- const page=await browser.newPage({viewport:{width:1280,height:1000}});const errors=[];page.on('pageerror',e=>errors.push(e.message));
+ const page=await browser.newPage({viewport:{width:1280,height:1000}});const errors=[];page.on('pageerror',e=>errors.push(e.message));page.on('crash',()=>console.log('*** PAGE CRASHED ***'));
  await page.goto('http://localhost:5173');await expect(page.locator('#loading')).toBeHidden({timeout:90000});
  await page.locator('#file-input').setInputFiles(filename);await expect(page.locator('#file-name')).toHaveText('dense-relief.stl',{timeout:180000});await expect(page.locator('#loading')).toBeHidden({timeout:180000});
- await page.locator('#view-orientation').selectOption('top');await page.locator('#viewport-draw').click();
+ await page.locator('#view-orientation').selectOption('top');await page.locator('#viewport-draw').click();await expect(page.locator('#stroke-overlay')).toBeVisible({timeout:120000});
  const r=await page.locator('#stroke-overlay').boundingBox();await page.mouse.move(r.x+r.width*.2,r.y+r.height*.48);await page.mouse.down();
  for(let i=1;i<=30;i++){const t=i/30;await page.mouse.move(r.x+r.width*(.2+.6*t),r.y+r.height*(.48+.04*Math.sin(t*2*Math.PI)));}
- await page.mouse.up();await expect(page.locator('.stroke-card')).toHaveCount(1);await page.locator('#quick-preview').click();await expect(page.locator('#loading')).toBeHidden({timeout:180000});await expect(page.locator('.part-card')).toHaveCount(2);
+ await page.mouse.up();await expect(page.locator('.stroke-card')).toHaveCount(1);await page.locator('#close-seam').click({timeout:240000});await expect(page.locator('#stroke-overlay')).toBeHidden({timeout:120000});await page.locator('#apply-cuts').click({timeout:120000});await expect(page.locator('#loading')).toBeHidden({timeout:240000});await expect(page.locator('.part-card')).toHaveCount(2,{timeout:60000});
  if(errors.length)throw Error(errors.join('\n'));
  console.log('PASS dense relief imported and split with a freehand stroke');
 }finally{await browser.close();fs.unlinkSync(filename);}

@@ -33,15 +33,17 @@ async function gesture(kind='horizontal',withScreenshot=false){
  const coordinates=Array.from({length:42},(_,i)=>{const t=i/41;return kind==='horizontal'?[r.x+r.width*(.12+.76*t),r.y+r.height*(.51+.09*Math.sin(t*Math.PI*2))]:[r.x+r.width*(.50+.035*Math.sin(t*Math.PI*2)),r.y+r.height*(.20+.60*t)];});
  await page.mouse.move(...coordinates[0]);await page.mouse.down();for(const p of coordinates.slice(1))await page.mouse.move(...p);
  if(withScreenshot)await page.screenshot({path:'tests/freehand-drawing.png',fullPage:true});
- await page.mouse.up();await expect(page.locator('#stroke-overlay')).toBeHidden();
+ await page.mouse.up();await page.waitForTimeout(600);
+ await page.locator('#close-seam').click();await expect(page.locator('#stroke-overlay')).toBeHidden();
 }
-await gesture('horizontal',true);await expect(page.locator('.stroke-card')).toHaveCount(1);await expect(page.locator('#export-all')).toBeDisabled();
+await page.locator('#view-orientation').selectOption('front');await page.waitForTimeout(400);
+await gesture('horizontal',true);await expect(page.locator('.stroke-card')).toHaveCount(1);await expect(page.locator('#export-all')).toBeEnabled({timeout:60000});
 await page.locator('#apply-cuts').click();await ready();await expect(page.locator('.part-card')).toHaveCount(2);console.log('PASS actual mouse drawing in perspective creates 2 parts');
 await page.locator('#view-orientation').selectOption('top');await gesture('vertical');await expect(page.locator('.stroke-card')).toHaveCount(2);
 await page.locator('#apply-cuts').click();await ready();const count=await page.locator('.part-card').count();if(count<3)throw Error('Second cut did not split parts');console.log('PASS multiple freehand cuts from different camera views:',count,'parts');
 await page.screenshot({path:'tests/freehand-parts.png',fullPage:true});
 const promise=page.waitForEvent('download');await page.locator('#export-all').click();const download=await promise;const files=unzipSync(fs.readFileSync(await download.path()));const profile=JSON.parse(strFromU8(files['profilo-taglio.json']));
-if(profile.mode!=='freehand'||profile.freehandCuts.length!==2||profile.freehandCuts[0].points.length<10)throw Error('Export does not preserve freehand paths');
+if(profile.mode!=='freehand'||profile.freehandCuts.length!==2||profile.freehandCuts[0].strokes[0].length<10)throw Error('Export does not preserve freehand paths');
 let total=0;
 for(const [name,bytes] of Object.entries(files))if(name.endsWith('.stl')){
  const geom=new STLLoader().parse(bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.byteLength));const pos=geom.attributes.position.array;
@@ -50,9 +52,9 @@ for(const [name,bytes] of Object.entries(files))if(name.endsWith('.stl')){
 if(Math.abs(total-960000)>1)throw Error('Export changed volume');console.log('PASS closed STL export, metadata, no lost volume:',total);
 await page.locator('#viewport-draw').click();await page.keyboard.press('Escape');await expect(page.locator('.stroke-card')).toHaveCount(2);await expect(page.locator('#export-all')).toBeEnabled();
 await page.locator('#undo-stroke').click();await expect(page.locator('.stroke-card')).toHaveCount(1);
-await page.locator('#apply-cuts').click();await ready();await expect(page.locator('.part-card')).toHaveCount(2);console.log('PASS Escape cancels, Undo restores the previous cut list');
-await page.locator('[data-stroke-enabled]').uncheck();await page.locator('#apply-cuts').click();await ready();await expect(page.locator('.part-card')).toHaveCount(1);await expect(page.locator('#export-all')).toBeDisabled();
-await page.locator('[data-stroke-enabled]').check();await page.locator('#apply-cuts').click();await ready();await expect(page.locator('.part-card')).toHaveCount(2);
+await page.locator('#apply-cuts').click();await ready();await expect(page.locator('.part-card')).toHaveCount(2,{timeout:15000});console.log('PASS Escape cancels, Undo restores the previous cut list');
+await page.locator('[data-stroke-enabled]').first().uncheck();await page.locator('#apply-cuts').click();await ready();await expect(page.locator('.part-card')).toHaveCount(1,{timeout:15000});await expect(page.locator('#export-all')).toBeDisabled();
+await page.locator('[data-stroke-enabled]').first().check();await page.locator('#apply-cuts').click();await ready();await expect(page.locator('.part-card')).toHaveCount(2,{timeout:15000});
 console.log('PASS disable/re-enable cuts');
 await page.setViewportSize({width:390,height:844});await page.locator('#viewport-draw').click();await expect(page.locator('#stroke-overlay')).toBeVisible();await page.screenshot({path:'tests/freehand-mobile.png',fullPage:true});await page.keyboard.press('Escape');
 if(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth))throw Error('Mobile horizontal overflow');

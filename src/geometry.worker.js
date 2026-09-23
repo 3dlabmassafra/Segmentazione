@@ -1,8 +1,9 @@
-import {splitFreehand} from './freehand-math.js';
 import { splitCurved } from './curve-math.js';
+import {splitSurfaceCuts} from './surface-math.js';
+import {buildBVH} from './mesh-bvh.js';
 import Module from 'manifold-3d';
 import wasmUrl from 'manifold-3d/manifold.wasm?url';
-let lib, original;
+let lib, original, surfaceBVH = null;
 const ready = Module({locateFile: () => wasmUrl}).then(m => {m.setup(); lib = m;});
 function pack(solid) {
   const m = solid.getMesh();
@@ -31,6 +32,21 @@ function validate(solid) {
     solid.delete();
     throw new Error('La mesh non è un solido chiuso valido. Ripara buchi, facce invertite o bordi non-manifold nel tuo slicer e riprova.');
   }
+}
+// The surface cuts need the triangle soup of the current model in an indexed
+// form the ray caster can walk.
+function modelMesh() {
+  const m = original.getMesh();
+  const positions = new Float32Array(m.numVert * 3);
+  for (let i = 0; i < m.numVert; i++) for (let a = 0; a < 3; a++) positions[3 * i + a] = m.vertProperties[m.numProp * i + a];
+  return { positions, indices: new Uint32Array(m.triVerts) };
+}
+function surfaceRaycaster() {
+  if (!surfaceBVH) {
+    const { positions, indices } = modelMesh();
+    surfaceBVH = buildBVH(positions, indices);
+  }
+  return surfaceBVH;
 }
 function demo() {
   const radius = z => 38 + 22*Math.sin(Math.PI*z/210) + 5*Math.sin(2*Math.PI*z/180);
@@ -70,11 +86,11 @@ self.onmessage = async ({data}) => {
       const normalized=next.translate([-(b.min[0]+b.max[0])/2,-(b.min[1]+b.max[1])/2,-b.min[2]]);
       next.delete();
       if(original) original.delete();
-      original=normalized;
+      original=normalized; surfaceBVH = null;
       self.postMessage({id,result:pack(original)});
-    } else if(type==='freehand-cut') {
+    } else if(type==='surface-cut') {
       if(!original) throw new Error('Carica prima un modello.');
-      const solids=splitFreehand(lib,original,data.cuts);
+      const solids=splitSurfaceCuts(lib,original,data.cuts,surfaceRaycaster());
       try { self.postMessage({id,result:solids.map(pack)}); }
       finally { solids.forEach(s=>{if(s!==original)s.delete();}); }
     } else if(type==='curve-cut') {
